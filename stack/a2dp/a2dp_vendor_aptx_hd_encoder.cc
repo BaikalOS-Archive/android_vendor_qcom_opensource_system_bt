@@ -28,6 +28,7 @@
 #include "bt_common.h"
 #include "osi/include/log.h"
 #include "osi/include/osi.h"
+#include "osi/include/properties.h"
 
 //
 // Encoder for aptX-HD Source Codec
@@ -270,6 +271,10 @@ static void a2dp_vendor_aptx_hd_encoder_update(
             p_feeding_params->bits_per_sample, p_feeding_params->channel_count);
 
   aptx_hd_init_framing_params(&a2dp_aptx_hd_encoder_cb.framing_params);
+
+  osi_property_set("baikal.last.a2dp_codec","APTX HD");
+  osi_property_set("baikal.last.a2dp_bitrate", 0);
+
 }
 
 void a2dp_vendor_aptx_hd_encoder_cleanup(void) {

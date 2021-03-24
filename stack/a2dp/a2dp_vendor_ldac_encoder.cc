@@ -35,6 +35,7 @@
 #include "bt_common.h"
 #include "osi/include/log.h"
 #include "osi/include/osi.h"
+#include "osi/include/properties.h"
 
 //
 // Encoder for LDAC Source Codec
@@ -346,6 +347,9 @@ static void a2dp_vendor_ldac_encoder_update(uint16_t peer_mtu,
 
   if (A2DP_IsCodecEnabledInOffload(BTAV_A2DP_CODEC_INDEX_SOURCE_LDAC)) {
     LOG_INFO(LOG_TAG,"LDAC is running in offload mode");
+    osi_property_set("baikal.last.a2dp_codec","LDAC");
+    osi_property_set("baikal.last.a2dp_bitrate", 0);
+
     return;
   }
   tA2DP_LDAC_ENCODER_PARAMS* p_encoder_params =
@@ -505,6 +509,10 @@ static void a2dp_vendor_ldac_encoder_update(uint16_t peer_mtu,
     LOG_ERROR(LOG_TAG, "%s: error initializing the LDAC encoder: %d", __func__,
               result);
   }
+
+  osi_property_set("baikal.last.a2dp_codec","LDAC");
+  osi_property_set("baikal.last.a2dp_bitrate", 0);
+
 }
 
 void a2dp_vendor_ldac_encoder_cleanup(void) {
