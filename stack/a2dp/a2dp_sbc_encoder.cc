@@ -140,9 +140,9 @@ static void a2dp_sbc_get_num_frame_iteration(uint8_t* num_of_iterations,
                                              uint8_t* num_of_frames,
                                              uint64_t timestamp_us);
 static uint8_t calculate_max_frames_per_packet(void);
-static uint16_t a2dp_sbc_source_rate(void);
+static uint16_t a2dp_sbc_source_rate(int bitrate);
 static uint32_t a2dp_sbc_frame_length(void);
-static uint16_t a2dp_sbc_offload_source_rate(bool is_peer_edr);
+static uint16_t a2dp_sbc_offload_source_rate(bool is_peer_edr, int bitrate);
 bool A2DP_LoadEncoderSbc(void) {
   // Nothing to do - the library is statically linked
   return true;
@@ -230,6 +230,7 @@ static void a2dp_sbc_encoder_update(uint16_t peer_mtu,
               __func__, a2dp_codec_config->name().c_str());
     return;
   }
+
   enc_update_in_progress = TRUE;
   LOG_DEBUG(LOG_TAG, "%s: Set flag enc_update_in_progress = %d", __func__, enc_update_in_progress);
   tx_enc_update_initiated = TRUE;
@@ -298,8 +299,13 @@ static void a2dp_sbc_encoder_update(uint16_t peer_mtu,
   else
     s16SamplingFreq = 48000;
 
+
+  LOG_DEBUG(LOG_TAG, "%s: using new_codec_config: ", __func__ );
+
+  print_codec_parameters(a2dp_codec_config->getCodecUserConfig());
+
   // Set the initial target bit rate
-  p_encoder_params->u16BitRate = a2dp_sbc_source_rate();
+  p_encoder_params->u16BitRate = a2dp_sbc_source_rate(a2dp_codec_config->getCodecUserConfig().codec_specific_1);
 
   LOG_DEBUG(LOG_TAG, "%s: MTU=%d, peer_mtu=%d min_bitpool=%d max_bitpool=%d",
             __func__, a2dp_sbc_encoder_cb.TxAaMtuSize, peer_mtu, min_bitpool,
@@ -361,10 +367,10 @@ static void a2dp_sbc_encoder_update(uint16_t peer_mtu,
 
     if (s16BitPool < 0) s16BitPool = 0;
 
-    LOG_DEBUG(LOG_TAG, "%s: bitpool candidate: %d (%d kbps)", __func__,
-              s16BitPool, p_encoder_params->u16BitRate);
+    LOG_DEBUG(LOG_TAG, "%s: bitpool candidate: %d (%d kbps) min_bitpool=%d max_bitpool=%d", __func__,
+              s16BitPool, p_encoder_params->u16BitRate, min_bitpool, max_bitpool);
 
-    if (s16BitPool > max_bitpool) {
+    if (s16BitPool >= max_bitpool) {
       LOG_DEBUG(LOG_TAG, "%s: computed bitpool too large (%d)", __func__,
                 s16BitPool);
       /* Decrease bitrate */
@@ -912,53 +918,30 @@ static uint8_t calculate_max_frames_per_packet(void) {
   return result;
 }
 
-static uint16_t a2dp_sbc_source_hq_rate(bool offload) {
+static uint16_t a2dp_sbc_source_hq_rate(bool offload, int bitrate) {
 
   uint16_t rate = A2DP_SBC_DEFAULT_BITRATE;
 
   /* 3DH5 maximum bitrates */
-  if( offload || (a2dp_sbc_encoder_cb.peer_supports_3mbps &&
-    a2dp_sbc_encoder_cb.TxAaMtuSize >= MIN_3MBPS_AVDTP_SAFE_MTU)) {
+  if( bitrate > A2DP_SBC_DEFAULT_BITRATE && (offload || (a2dp_sbc_encoder_cb.peer_supports_3mbps &&
+    a2dp_sbc_encoder_cb.TxAaMtuSize >= MIN_3MBPS_AVDTP_SAFE_MTU)) ) {
     /* 3DH5 alternative bitrates */
 
-    if( osi_property_get_int32("persist.bluetooth.sbc_hdu", 0) ) {
-      rate = A2DP_SBC_3DH5_BITRATE;
-      if (a2dp_sbc_encoder_cb.sbc_encoder_params.s16SamplingFreq == SBC_sf48000)
-         rate = A2DP_SBC_3DH5_48KHZ_BITRATE;
-      LOG_DEBUG(LOG_TAG, "%s: a2dp 3Mbps HDX rate %d", __func__, rate);
-      return rate;
-    } 
+    rate = bitrate;
+    LOG_DEBUG(LOG_TAG, "%s: a2dp 3Mbps HDX rate %d", __func__, rate);
+    return rate;
+  } 
 
-    if( osi_property_get_int32("persist.bluetooth.sbc_hdx", 0) ) {
-      rate = A2DP_SBC_2DH5_BITRATE;
-      if (a2dp_sbc_encoder_cb.sbc_encoder_params.s16SamplingFreq == SBC_sf48000)
-         rate = A2DP_SBC_2DH5_48KHZ_BITRATE;
-      LOG_DEBUG(LOG_TAG, "%s: a2dp 3Mbps HD rate %d", __func__, rate);
-      return rate;
-    } 
-
-  }
-
-  if( osi_property_get_int32("persist.bluetooth.sbc_hd", 0) ) {
-  	    /* 2DH5 alternative bitrates */
-	    rate = A2DP_SBC_DEFAULT_BITRATE;
-	    if (a2dp_sbc_encoder_cb.sbc_encoder_params.s16SamplingFreq == SBC_sf48000 || offload)
-	        rate = A2DP_SBC_DEFAULT_OFFLOAD_BITRATE;
-        LOG_DEBUG(LOG_TAG, "%s: a2dp SBC DC rate %d", __func__, rate);
-        return rate;
-  }
-
-
-  if (a2dp_sbc_encoder_cb.sbc_encoder_params.s16SamplingFreq == SBC_sf48000)
-    rate = A2DP_SBC_DEFAULT_OFFLOAD_BITRATE;
-
-  LOG_DEBUG(LOG_TAG, "%s: a2dp default EDR rate %d", __func__, rate);
+  rate = A2DP_SBC_DEFAULT_BITRATE;
+  if (a2dp_sbc_encoder_cb.sbc_encoder_params.s16SamplingFreq == SBC_sf48000 || offload)
+      rate = A2DP_SBC_DEFAULT_OFFLOAD_BITRATE;
+  LOG_DEBUG(LOG_TAG, "%s: a2dp SBC default rate %d", __func__, rate);
   return rate;
 }
 
-static uint16_t a2dp_sbc_offload_source_rate(bool is_peer_edr) {
+static uint16_t a2dp_sbc_offload_source_rate(bool is_peer_edr, int bitrate) {
   uint16_t rate = A2DP_SBC_DEFAULT_OFFLOAD_BITRATE;
-  LOG_DEBUG(LOG_TAG,"%s",__func__);
+  LOG_DEBUG(LOG_TAG,"%s: bitrate %d",__func__, bitrate);
   /* restrict bitrate if a2dp link is non-edr */
   if (!is_peer_edr) {
     rate = A2DP_SBC_NON_EDR_OFFLOAD_MAX_RATE;
@@ -966,16 +949,21 @@ static uint16_t a2dp_sbc_offload_source_rate(bool is_peer_edr) {
                 __func__, rate);
     return rate;
   }
-  if( osi_property_get_int32("persist.bluetooth.sbc_hd", 0) ) {
-    return a2dp_sbc_source_hq_rate(true);
+
+  if( bitrate > 0 ) {
+    return a2dp_sbc_source_hq_rate(true, bitrate);
   }
+
   LOG_DEBUG(LOG_TAG,"%s rate = %d",__func__,rate);
   return rate;
 }
 
-static uint16_t a2dp_sbc_source_rate(void) {
+static uint16_t a2dp_sbc_source_rate(int bitrate) {
   uint16_t rate = A2DP_SBC_DEFAULT_BITRATE;
   char value[PROPERTY_VALUE_MAX] = {'\0'};
+
+  LOG_DEBUG(LOG_TAG,"%s: bitrate %d",__func__, bitrate);
+
   osi_property_get("persist.vendor.btstack.sbcmq", value, "false");
   if (!(strcmp(value,"true"))) {
      LOG_ERROR(LOG_TAG,"%s:MQ enabled",__func__);
@@ -988,8 +976,8 @@ static uint16_t a2dp_sbc_source_rate(void) {
                 __func__, rate);
     return rate;
   }
-  if( osi_property_get_int32("persist.bluetooth.sbc_hd", 0) ) {
-    return a2dp_sbc_source_hq_rate(false);
+  if( bitrate > 0 ) {
+    return a2dp_sbc_source_hq_rate(false,bitrate);
   }
   LOG_DEBUG(LOG_TAG,"%s rate = %d",__func__,rate);
   return rate;
@@ -1083,7 +1071,7 @@ uint16_t a2dp_sbc_calulate_offload_bitrate(A2dpCodecConfig* a2dp_codec_config, b
   bits_per_sample =  a2dp_codec_config->getAudioBitsPerSample();
      //A2DP_GetTrackBitsPerSampleSbc(p_codec_info); TODO
   channel_count = A2DP_GetTrackChannelCountSbc(p_codec_info);
-  LOG_DEBUG(LOG_TAG, "%s: sample_rate=%u bits_per_sample=%u channel_count=%u min_bitpool=%x max_bitpool=%x",
+  LOG_DEBUG(LOG_TAG, "%s: sample_rate=%u bits_per_sample=%u channel_count=%u min_bitpool=%d max_bitpool=%d",
            __func__, sample_rate, bits_per_sample, channel_count, min_bitpool, max_bitpool);
 
  // The codec parameters
@@ -1124,7 +1112,7 @@ uint16_t a2dp_sbc_calulate_offload_bitrate(A2dpCodecConfig* a2dp_codec_config, b
   else
     s16SamplingFreq = 48000;
 
-  offload_bitrate = a2dp_sbc_offload_source_rate(is_peer_edr);
+  offload_bitrate = a2dp_sbc_offload_source_rate(is_peer_edr, a2dp_codec_config->getCodecUserConfig().codec_specific_1);
   LOG_WARN(LOG_TAG,"initial bitrate = %d", offload_bitrate);
   do {
     if ((s16ChannelMode == SBC_JOINT_STEREO) ||
@@ -1174,10 +1162,10 @@ uint16_t a2dp_sbc_calulate_offload_bitrate(A2dpCodecConfig* a2dp_codec_config, b
 
     if (s16BitPool < 0) s16BitPool = 0;
 
-    LOG_DEBUG(LOG_TAG, "%s: bitpool candidate: %d (%d kbps)", __func__,
-              s16BitPool, offload_bitrate);
+    LOG_DEBUG(LOG_TAG, "%s: bitpool candidate: %d (%d kbps) min_bitpool=%d max_bitpool=%d", __func__,
+              s16BitPool, offload_bitrate, min_bitpool, max_bitpool);
 
-    if (s16BitPool > max_bitpool) {
+    if (s16BitPool >= max_bitpool) {
       LOG_DEBUG(LOG_TAG, "%s: computed bitpool too large (%d)", __func__,
                 s16BitPool);
       /* Decrease bitrate */
