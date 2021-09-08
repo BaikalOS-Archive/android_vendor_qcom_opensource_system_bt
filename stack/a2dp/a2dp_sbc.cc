@@ -1378,7 +1378,7 @@ bool A2dpCodecConfigSbc::setCodecConfig(const uint8_t* p_peer_codec_info,
 
   // Try using the prefered peer codec config (if valid), instead of the peer
   // capability.
-  if (is_capability && A2DP_IsPeerSinkCodecValidSbc(ota_codec_peer_config_)) {
+  /*if (is_capability && A2DP_IsPeerSinkCodecValidSbc(ota_codec_peer_config_)) {
     status = A2DP_ParseInfoSbc(&sink_info_cie, ota_codec_peer_config_, false);
     if (status != A2DP_SUCCESS) {
       // Use the peer codec capability
@@ -1386,7 +1386,7 @@ bool A2dpCodecConfigSbc::setCodecConfig(const uint8_t* p_peer_codec_info,
            A2DP_ParseInfoSbc(&sink_info_cie, p_peer_codec_info, is_capability);
       CHECK(status == A2DP_SUCCESS);
     }
-  }
+  }*/
 
   //
   // Build the preferred configuration
